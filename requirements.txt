@@ -1,0 +1,9 @@
+Lista bibliotek potrzebnych do uruchomienia skryptu ładującego dane.
+
+```text
+osmnx==1.9.1
+geopandas==0.14.3
+SQLAlchemy==2.0.28
+psycopg2-binary==2.9.9
+geoalchemy2==0.14.6
+Shapely==2.0.3
