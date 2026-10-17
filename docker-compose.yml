@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: torun_postgis
+    environment:
+      - POSTGRES_USER=host
+      - POSTGRES_PASSWORD=<TWOJE_HASLO>
+      - POSTGRES_DB=gis_routing
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+
+volumes:
+  postgis_data:
