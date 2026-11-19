@@ -1,6 +1,3 @@
-Lista bibliotek potrzebnych do uruchomienia skryptu ładującego dane.
-
-```text
 osmnx==1.9.1
 geopandas==0.14.3
 SQLAlchemy==2.0.28
