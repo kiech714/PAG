@@ -1,1 +1,616 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nawigacja Turystyczna Toruń</title>
 
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+  <style>
+    :root {
+      --ink: #1d2733;
+      --muted: #66727f;
+      --surface: #ffffff;
+      --line: #d9dee4;
+      --start: #1f7a4d;
+      --meta: #b3261e;
+      --stop: #17456b;
+      --highlight: #f39c12;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+    }
+
+    body {
+      --sw: 360px; --sh: 50vh;
+      display: grid; grid-template-columns: var(--sw) 1fr;
+      transition: grid-template-columns .28s ease, grid-template-rows .28s ease;
+    }
+    body.is-collapsed { --sw: 0px; --sh: 0px; }
+
+    .sidebar {
+      min-width: 0; overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--line);
+      z-index: 1000;
+    }
+    .sidebar__head   { padding: 16px 16px 8px; }
+    .sidebar__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 8px; }
+    .sidebar__foot   { padding: 12px 16px 16px; border-top: 1px solid var(--line); }
+
+    .title { margin: 0 0 4px; font-size: 1.1rem; font-weight: 650; }
+    .hint  { margin: 0; font-size: .85rem; line-height: 1.4; color: var(--muted); }
+    .section-title { margin: 16px 0 8px; font-size: .95rem; font-weight: 650; }
+
+    .point {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 10px;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+    .point:has(input:checked) { border-color: var(--stop); background: #f1f6fa; }
+    .point:has(input:focus-visible) { outline: 2px solid var(--stop); outline-offset: 2px; }
+    .point input { grid-row: span 2; margin: 0; accent-color: var(--stop); }
+    .point__name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: .92rem; }
+    .point__dot  { width: 10px; height: 10px; border-radius: 50%; }
+    .point__dot--start { background: var(--start); }
+    .point__dot--meta  { background: var(--meta); }
+    .point__coords { font-variant-numeric: tabular-nums; font-size: .85rem; color: var(--muted); }
+
+    .controls { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+    .control-label { display: flex; flex-direction: column; font-size: .85rem; font-weight: 600; gap: 4px; }
+    .control-input { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: .85rem;}
+
+    .poi-list { list-style: none; margin: 0; padding: 0; }
+    .poi { margin-bottom: 6px; }
+    .poi__main {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 0 10px;
+      align-items: center;
+      padding: 8px 10px;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      background: #f1f6fa;
+      border: 1px solid var(--stop);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .poi__main:hover { background: #e2ecf3; border-color: var(--highlight); }
+    .poi__badge {
+      grid-row: span 2;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--stop);
+      font-size: .8rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .poi__name { font-size: .9rem; font-weight: 600; }
+    .poi__meta { font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .empty { margin: 0; padding: 12px; font-size: .85rem; line-height: 1.4; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius); }
+
+    .actions { display: flex; gap: 8px; }
+    .btn {
+      flex: 1;
+      padding: 10px 12px;
+      font: inherit;
+      font-weight: 600;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .btn--primary { flex: 2; background: var(--stop); border-color: var(--stop); color: #fff; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .status { min-height: 1.2em; margin: 8px 0 0; font-size: .82rem; color: var(--muted); }
+
+    #map { height: 100%; min-height: 0; }
+
+    .pin {
+      display: grid;
+      place-items: center;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+    }
+    .pin--start { width: 28px; height: 28px; background: var(--start); font-size: .75rem; }
+    .pin--meta  { width: 28px; height: 28px; background: var(--meta);  font-size: .75rem; }
+    
+    .poi-pin {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      background: var(--stop);
+      border: 2px solid #fff;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 700;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+
+    .sidebar > * { min-width: min(360px, 100vw); }
+    .poi__main--active, .poi__main--active:hover { background: #fff4e0; border-color: var(--highlight); }
+    .poi-pin--active { background: var(--highlight); }
+    .swap { display: grid; place-items: center; width: 32px; height: 32px; margin: -12px auto -4px; padding: 0; position: relative; z-index: 1;
+      border: 1px solid var(--line); border-radius: 50%; background: var(--surface); color: var(--stop); cursor: pointer; }
+    .swap:hover:not(:disabled) { border-color: var(--stop); background: #f1f6fa; }
+    .swap:disabled { opacity: .45; cursor: not-allowed; }
+    .btn--primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+    .spinner { display: none; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+    #btn-route[aria-busy="true"] .spinner { display: inline-block; }
+    #btn-route[aria-busy="true"]:disabled { opacity: .85; cursor: progress; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status--error { color: var(--meta); }
+    .summary { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafbfc; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; }
+    .stat dt { font-size: .75rem; color: var(--muted); }
+    .stat dd { margin: 0; font-size: 1.05rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .stat--accent dd { color: #b9770e; }
+    .summary__sub { margin: 10px 0 6px; font-size: .85rem; font-weight: 600; }
+    .summary__ref { margin: 10px 0 0; font-size: .8rem; line-height: 1.4; color: var(--muted); }
+    .toggle { position: fixed; z-index: 1100; top: 50%; left: var(--sw); width: 22px; height: 56px; transform: translateY(-50%);
+      display: grid; place-items: center; padding: 0; color: var(--ink); background: var(--surface); cursor: pointer;
+      border: 1px solid var(--line); border-left: 0; border-radius: 0 8px 8px 0; transition: left .28s ease; }
+    .toggle svg { transition: transform .28s ease; }
+    body.is-collapsed .toggle svg { transform: rotate(180deg); }
+    @media (prefers-reduced-motion: reduce) { body, .toggle, .toggle svg { transition: none; } }
+
+    @media (max-width: 700px) {
+      body { grid-template-columns: 1fr; grid-template-rows: 1fr var(--sh); }
+      #map { order: 1; }
+      .sidebar { order: 2; border-right: 0; border-top: 1px solid var(--line); }
+      .toggle { top: auto; left: 50%; bottom: var(--sh); width: 56px; height: 22px; transform: translateX(-50%);
+        border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; transition: bottom .28s ease; }
+      .toggle svg { transform: rotate(-90deg); }
+      body.is-collapsed .toggle svg { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar" id="sidebar" aria-label="Planowanie trasy">
+    <div class="sidebar__head">
+      <h1 class="title">Nawigacja Turystyczna Toruń</h1>
+      <p class="hint">Wybierz punkt początkowy i punkt docelowy klikając mapę.</p>
+    </div>
+
+    <div class="sidebar__scroll">
+      <label class="point">
+        <input type="radio" name="active-point" value="start">
+        <span class="point__name"><span class="point__dot point__dot--start"></span>Start</span>
+        <span class="point__coords" data-coords="start">nie wybrano</span>
+      </label>
+
+      <button type="button" class="swap" id="btn-swap" title="Zamień Start i Metę" aria-label="Zamień Start i Metę">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 20V5m0 0L4 9m4-4 4 4M16 4v15m0 0-4-4m4 4 4-4"/></svg>
+      </button>
+
+      <label class="point">
+        <input type="radio" name="active-point" value="meta">
+        <span class="point__name"><span class="point__dot point__dot--meta"></span>Meta</span>
+        <span class="point__coords" data-coords="meta">nie wybrano</span>
+      </label>
+
+      <div class="controls">
+          <label class="control-label">
+              Tryb wyznaczenia trasy:
+              <select id="sel-pref" class="control-input">
+                  <option value="0.0">Standardowa (najszybsza)</option>
+                  <option value="0.3">Lekko turystyczna</option>
+                  <option value="0.7">Wysoka preferencja turystyczna</option>
+                  <option value="1.0">Maksymalnie turystyczna (skłonna do objazdów)</option>
+              </select>
+          </label>
+      </div>
+
+      <section class="summary" id="summary" aria-live="polite" hidden></section>
+
+      <h2 class="section-title" id="poi-title">Mijane atrakcje:</h2>
+      <ul class="poi-list" id="poi-list" aria-labelledby="poi-title"></ul>
+      <p class="empty" id="poi-empty">Brak obiektów na trasie.</p>
+    </div>
+
+    <div class="sidebar__foot">
+      <div class="actions">
+        <button type="button" class="btn" id="btn-reset">Wyczyść</button>
+        <button type="button" class="btn btn--primary" id="btn-route" disabled><span class="spinner" aria-hidden="true"></span><span>Wyznacz trasę</span></button>
+      </div>
+      <p class="status" id="status" role="status" aria-live="polite">Gotowy. Wskaż punkt startowy na mapie.</p>
+    </div>
+  </aside>
+  <button type="button" class="toggle" id="btn-toggle" aria-expanded="true" aria-controls="sidebar" aria-label="Zwiń panel">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>
+  </button>
+
+  <div id="map" aria-label="Mapa Torunia"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script type="module">
+    'use strict';
+
+    const POINT = Object.freeze({ START: 'start', META: 'meta' });
+    const COLORS = Object.freeze({ route: '#17456b', highlight: '#f39c12', ref: '#7b8794' });
+    const ESRI = 'Tiles &copy; Esri';
+
+    const CONFIG = Object.freeze({
+      map: { center: [53.0137, 18.5984], zoom: 14 },
+      basemaps: [
+        { name: 'Esri World Street Map', isDefault: true, maxZoom: 19, attribution: ESRI,
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}' },
+        { name: 'CartoDB Positron', maxZoom: 20, subdomains: 'abcd', attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+          url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png' },
+        { name: 'OpenStreetMap Standard', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+          url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' },
+        { name: 'Esri World Imagery', maxZoom: 19, attribution: ESRI + ' &mdash; Maxar, Earthstar Geographics, GIS User Community',
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}' },
+      ],
+      markers: {
+        [POINT.START]: { label: 'S', className: 'pin pin--start', title: 'Start' },
+        [POINT.META]:  { label: 'M', className: 'pin pin--meta',  title: 'Meta' },
+      },
+      api: { routeUrl: 'http://127.0.0.1:8000/api/wyznacz_trase' },
+    });
+
+    /* ---------- formatowanie ---------- */
+    const num = (v) => v.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmt = {
+      km: (m) => `${num(m / 1000)} km`,
+      time: (s) => {
+        if (!Number.isFinite(s)) return '—';
+        const m = Math.round(s / 60);
+        return m < 1 ? '<1 min' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+      },
+      dKm: (m) => `${m < 0 ? '−' : '+'}${fmt.km(Math.abs(m))}`,
+      dTime: (s) => {
+        if (!Number.isFinite(s)) return '—';
+        const m = Math.round(Math.abs(s) / 60);
+        return m === 0 ? '±0 min' : `${s < 0 ? '−' : '+'}${m} min`;
+      },
+    };
+    const refSummary = (model) => {
+      const { ref } = model;
+      return `Trasa najszybsza: ${fmt.km(ref.distM)} · ${fmt.time(ref.timeS)}. ` +
+             `Różnica: ${fmt.dKm(model.distM - ref.distM)} · ${fmt.dTime(model.timeS - ref.timeS)}`;
+    };
+
+    /* ---------- geometria (metoda sferyczna Leaflet) ---------- */
+    const routePoints = (geojson) => {
+      const g = geojson?.type === 'Feature' ? geojson.geometry : geojson;
+      const coords = g?.type === 'MultiLineString' ? g.coordinates.flat() : g?.coordinates;
+      if (!coords?.length) throw new Error('Odpowiedź nie zawiera geometrii trasy.');
+      return coords.map(([lon, lat]) => L.latLng(lat, lon));
+    };
+    const cumulative = (pts) => pts.reduce((acc, p, i) => (acc.push(i ? acc[i - 1] + pts[i - 1].distanceTo(p) : 0), acc), []);
+    const nearestIndex = (pts, target) => pts.reduce((best, p, i) => (p.distanceTo(target) < pts[best].distanceTo(target) ? i : best), 0);
+
+    const buildModel = (data, refData) => {
+      const pts = routePoints(data.trasa_geojson);
+      const cum = cumulative(pts);
+      const pois = (data.atrakcje ?? []).map((poi) => {
+        const index = nearestIndex(pts, L.latLng(poi.lat, poi.lon));
+        return { ...poi, index, distM: cum[index], timeS: poi.czas_dojazdu_s };
+      });
+      const ref = refData && {
+        geojson: refData.trasa_geojson,
+        distM: cumulative(routePoints(refData.trasa_geojson)).at(-1),
+        timeS: refData.metryki?.czas_calkowity_s,
+      };
+      return { geojson: data.trasa_geojson, pts, pois, ref, distM: cum.at(-1), timeS: data.metryki?.czas_calkowity_s };
+    };
+
+    /* ---------- API ---------- */
+    const requestRoute = async (points, pref, signal) => {
+      const res = await fetch(CONFIG.api.routeUrl, {
+        method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_lat: points[POINT.START].lat, start_lon: points[POINT.START].lng,
+          meta_lat: points[POINT.META].lat, meta_lon: points[POINT.META].lng,
+          algorytm: 'astar', preferencja_turystyczna: pref,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Błąd silnika backendowego.');
+      return data;
+    };
+
+    /* ---------- store ---------- */
+    const emptyPoints = () => Object.freeze({ [POINT.START]: null, [POINT.META]: null });
+
+    const createStore = () => {
+      let state = Object.freeze({ points: emptyPoints(), active: POINT.START });
+      const listeners = new Set();
+      const commit = (next) => { state = Object.freeze(next); listeners.forEach((l) => l(state)); };
+      return {
+        getState: () => state,
+        subscribe(listener) { listeners.add(listener); listener(state); return () => listeners.delete(listener); },
+        setActive(type) { if (type !== state.active) commit({ ...state, active: type }); },
+        setPoint(type, { lat, lng }) {
+          const points = Object.freeze({ ...state.points, [type]: Object.freeze({ lat, lng }) });
+          commit({ ...state, points, active: type === POINT.START && !points[POINT.META] ? POINT.META : type });
+        },
+        swap() {
+          const { START, META } = POINT;
+          commit({ ...state, points: Object.freeze({ [START]: state.points[META], [META]: state.points[START] }) });
+        },
+        reset() { commit({ ...state, points: emptyPoints(), active: POINT.START }); },
+      };
+    };
+
+    /* ---------- mapa ---------- */
+    const createMapView = ({ elementId, onMapClick, onMarkerDrag }) => {
+      const map = L.map(elementId).setView(CONFIG.map.center, CONFIG.map.zoom);
+      const bases = Object.fromEntries(CONFIG.basemaps.map((b) => [b.name, L.tileLayer(b.url, b)]));
+      bases[CONFIG.basemaps.find((b) => b.isDefault).name].addTo(map);
+      L.control.layers(bases, null, { position: 'topright' }).addTo(map);
+
+      ['reference', 'route', 'highlight'].forEach((name, i) => { map.createPane(name).style.zIndex = 410 + i * 5; });
+
+      const routeMarkers = new Map();
+      const poiLayer = L.layerGroup().addTo(map);
+      let poiMarkers = [], routeLayer = null, refLayer = null, highlightLayer = null;
+
+      const pinIcon = (className, label, size) => L.divIcon({
+        className: '', html: `<span class="${className}">${label}</span>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+      });
+      const upsertRouteMarker = (type, { lat, lng }) => {
+        const existing = routeMarkers.get(type);
+        if (existing) return existing.setLatLng([lat, lng]);
+        const { className, label, title } = CONFIG.markers[type];
+        const marker = L.marker([lat, lng], { icon: pinIcon(className, label, 28), draggable: true, title, zIndexOffset: 1000 }).addTo(map);
+        marker.on('dragend', () => onMarkerDrag(type, marker.getLatLng()));
+        routeMarkers.set(type, marker);
+      };
+      const removeRouteMarker = (type) => { routeMarkers.get(type)?.remove(); routeMarkers.delete(type); };
+      const drop = (layer) => { if (layer) map.removeLayer(layer); return null; };
+
+      map.on('click', (e) => onMapClick(e.latlng));
+
+      const api = {
+        render(state) {
+          Object.values(POINT).forEach((t) => (state.points[t] ? upsertRouteMarker(t, state.points[t]) : removeRouteMarker(t)));
+        },
+        drawRoute(model) {
+          routeLayer = drop(routeLayer); refLayer = drop(refLayer); highlightLayer = drop(highlightLayer);
+          routeLayer = L.geoJSON(model.geojson, { pane: 'route', style: { color: COLORS.route, weight: 5, opacity: 0.85 } }).addTo(map);
+          if (model.ref) {
+            refLayer = L.geoJSON(model.ref.geojson, {
+              pane: 'reference', style: { color: COLORS.ref, weight: 4, opacity: 0.9, dashArray: '8 8' },
+              onEachFeature: (_, layer) => layer.bindTooltip(refSummary(model), { sticky: true }),
+            }).addTo(map);
+          }
+          api.fitToRoute();
+        },
+        fitToRoute() {
+          if (!routeLayer) return;
+          const bounds = L.latLngBounds(routeLayer.getBounds());
+          if (refLayer) bounds.extend(refLayer.getBounds());
+          map.fitBounds(bounds, { padding: [50, 50] });
+        },
+        drawPOIs(pois, onPick) {
+          poiLayer.clearLayers();
+          poiMarkers = pois.map((poi, i) => {
+            const icon = L.divIcon({ className: '', html: `<div class="poi-pin">${i + 1}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+            return L.marker([poi.lat, poi.lon], { icon, zIndexOffset: 500 })
+              .bindTooltip(poi.nazwa, { direction: 'top', offset: [0, -10] })
+              .on('click', () => onPick(i)).addTo(poiLayer);
+          });
+        },
+        markActivePoi(index) {
+          poiMarkers.forEach((m, i) => m.getElement()?.firstElementChild.classList.toggle('poi-pin--active', i === index));
+        },
+        highlight(pts, poi) {
+          highlightLayer = drop(highlightLayer);
+          highlightLayer = L.polyline(pts, { pane: 'highlight', color: COLORS.highlight, weight: 7, opacity: 1 }).addTo(map);
+          map.flyTo([poi.lat, poi.lon], 16, { duration: 1 });
+        },
+        clearHighlight() { highlightLayer = drop(highlightLayer); },
+        clearAll() {
+          routeLayer = drop(routeLayer); refLayer = drop(refLayer); highlightLayer = drop(highlightLayer);
+          poiLayer.clearLayers(); poiMarkers = [];
+        },
+        invalidateSize() { map.invalidateSize({ pan: false }); },
+      };
+      return api;
+    };
+
+    /* ---------- panel ---------- */
+    const createPanel = (cb) => {
+      const $ = (sel) => document.querySelector(sel);
+      const radios = [...document.querySelectorAll('input[name="active-point"]')];
+      const listEl = $('#poi-list'), emptyEl = $('#poi-empty'), summaryEl = $('#summary');
+      const prefSelect = $('#sel-pref'), routeButton = $('#btn-route'), swapButton = $('#btn-swap'), statusEl = $('#status');
+      let ready = false, loading = false;
+
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const syncButton = () => { routeButton.disabled = !ready || loading; routeButton.setAttribute('aria-busy', String(loading)); };
+
+      radios.forEach((r) => r.addEventListener('change', () => cb.onSelectPoint(r.value)));
+      $('#btn-reset').addEventListener('click', cb.onReset);
+      routeButton.addEventListener('click', cb.onRoute);
+      swapButton.addEventListener('click', cb.onSwap);
+      prefSelect.addEventListener('change', cb.onPrefChange);
+      $('#btn-toggle').addEventListener('click', cb.onToggle);
+
+      return {
+        render(state) {
+          Object.values(POINT).forEach((t) => {
+            const p = state.points[t];
+            $(`[data-coords="${t}"]`).textContent = p ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : 'nie wybrano';
+          });
+          radios.forEach((r) => { r.checked = r.value === state.active; });
+          ready = Boolean(state.points[POINT.START] && state.points[POINT.META]);
+          swapButton.disabled = !state.points[POINT.START] && !state.points[POINT.META];
+          syncButton();
+        },
+        setLoading(value) { loading = value; syncButton(); },
+        setStatus(msg, isError = false) { statusEl.textContent = msg; statusEl.classList.toggle('status--error', isError); },
+        getPref: () => parseFloat(prefSelect.value) || 0.0,
+        renderAttractions(pois) {
+          emptyEl.hidden = pois.length > 0;
+          listEl.replaceChildren(...pois.map((poi, i) => {
+            const li = el('li', 'poi');
+            const btn = el('button', 'poi__main');
+            btn.type = 'button';
+            btn.setAttribute('aria-pressed', 'false');
+            btn.append(el('span', 'poi__badge', String(i + 1)), el('span', 'poi__name', poi.nazwa),
+                       el('span', 'poi__meta', `${fmt.km(poi.distM)} · ${fmt.time(poi.timeS)} od startu`));
+            btn.addEventListener('click', () => cb.onPoiClick(i));
+            li.append(btn);
+            return li;
+          }));
+        },
+        setActivePoi(index) {
+          [...listEl.querySelectorAll('.poi__main')].forEach((btn, i) => {
+            btn.classList.toggle('poi__main--active', i === index);
+            btn.setAttribute('aria-pressed', String(i === index));
+            if (i === index) btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          });
+        },
+        renderSummary(model, poi) {
+          summaryEl.hidden = !model;
+          if (!model) return summaryEl.replaceChildren();
+          const stats = (items, mod) => {
+            const dl = el('dl', 'stats');
+            items.forEach(([label, value]) => {
+              const box = el('div', `stat${mod ? ` stat--${mod}` : ''}`);
+              box.append(el('dt', '', label), el('dd', '', value));
+              dl.append(box);
+            });
+            return dl;
+          };
+          const nodes = [stats([['Długość całkowita', fmt.km(model.distM)], ['Szacowany czas', fmt.time(model.timeS)]])];
+          if (poi) nodes.push(el('p', 'summary__sub', `Odcinek do: ${poi.nazwa}`),
+                              stats([['Długość odcinka', fmt.km(poi.distM)], ['Czas odcinka', fmt.time(poi.timeS)]], 'accent'));
+          if (model.ref) nodes.push(el('p', 'summary__ref', `Szara linia przerywana. ${refSummary(model)}`));
+          summaryEl.replaceChildren(...nodes);
+        },
+      };
+    };
+
+    /* ---------- aplikacja ---------- */
+    const initApp = () => {
+      const store = createStore();
+      let model = null, activePoi = null, inflight = null;
+
+      const refresh = () => panel.renderSummary(model, model?.pois[activePoi]);
+      const clearSelection = () => {
+        activePoi = null;
+        mapView.clearHighlight(); mapView.markActivePoi(null); panel.setActivePoi(null);
+        mapView.fitToRoute(); refresh();
+      };
+      const togglePoi = (i) => {
+        if (!model) return;
+        if (i === activePoi) return clearSelection();
+        activePoi = i;
+        const poi = model.pois[i];
+        mapView.highlight(model.pts.slice(0, poi.index + 1), poi);
+        mapView.markActivePoi(i); panel.setActivePoi(i); refresh();
+      };
+      const clearResult = () => { model = null; activePoi = null; mapView.clearAll(); panel.renderAttractions([]); refresh(); };
+
+      const calculate = async () => {
+        const { points } = store.getState();
+        if (!points[POINT.START] || !points[POINT.META]) return;
+        inflight?.abort();
+        const ctrl = (inflight = new AbortController());
+        const pref = panel.getPref();
+        panel.setLoading(true);
+        panel.setStatus('Obliczanie trasy w toku...');
+        try {
+          const main = requestRoute(points, pref, ctrl.signal);
+          const ref = pref > 0
+            ? requestRoute(points, 0.0, ctrl.signal).catch((e) => { if (e.name === 'AbortError') throw e; console.warn('Trasa referencyjna:', e); return null; })
+            : Promise.resolve(null);
+          const [data, refData] = await Promise.all([main, ref]);
+          model = buildModel(data, refData);
+          activePoi = null;
+          mapView.drawRoute(model); mapView.drawPOIs(model.pois, togglePoi);
+          panel.renderAttractions(model.pois); refresh();
+          panel.setStatus(`Wyznaczono trasę: ${fmt.km(model.distM)}, ${fmt.time(model.timeS)}.`);
+        } catch (error) {
+          if (error.name === 'AbortError') return;
+          ctrl.abort();
+          console.error('Routing Error:', error);
+          clearResult();
+          panel.setStatus(`Błąd: ${error.message}`, true);
+        } finally {
+          if (inflight === ctrl) { inflight = null; panel.setLoading(false); }
+        }
+      };
+
+      const mapView = createMapView({
+        elementId: 'map',
+        onMapClick: (latlng) => {
+          const state = store.getState();
+          store.setPoint(state.active, latlng);
+          const p = store.getState().points;
+          if (model && p[POINT.START] && p[POINT.META]) panel.setStatus('Zmieniono punkt. Kliknij „Wyznacz trasę”.');
+        },
+        onMarkerDrag: (type, latlng) => { store.setPoint(type, latlng); calculate(); },
+      });
+
+      const panel = createPanel({
+        onSelectPoint: (type) => store.setActive(type),
+        onPoiClick: togglePoi,
+        onSwap: () => { store.swap(); calculate(); },
+        onPrefChange: calculate,
+        onRoute: calculate,
+        onReset: () => {
+          inflight?.abort(); inflight = null; panel.setLoading(false);
+          store.reset(); clearResult();
+          panel.setStatus('Wyczyszczono dane. Wskaż nowy punkt startowy.');
+        },
+        onToggle: () => {
+          const collapsed = document.body.classList.toggle('is-collapsed');
+          const toggle = document.getElementById('btn-toggle');
+          document.getElementById('sidebar').inert = collapsed;
+          toggle.setAttribute('aria-expanded', String(!collapsed));
+          toggle.setAttribute('aria-label', collapsed ? 'Rozwiń panel' : 'Zwiń panel');
+          mapView.invalidateSize();
+        },
+      });
+
+      
+      document.body.addEventListener('transitionend', (e) => { if (e.target === document.body) mapView.invalidateSize(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && activePoi !== null) clearSelection(); });
+
+      store.subscribe((state) => { mapView.render(state); panel.render(state); });
+    };
+
+    initApp();
+  </script>
+</body>
+</html>
